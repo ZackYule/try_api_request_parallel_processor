@@ -1,19 +1,16 @@
-# This code is for v1 of the openai package: pypi.org/project/openai
-from openai import OpenAI
+import os
+import time
 import logging
+import re
+import openai
 from logger_config import setup_logging
 
+# 设置日志记录
 logger = logging.getLogger(__name__)
-
-client = OpenAI()
-import time
-import openai
-
-# 设置你的 OpenAI API 密钥
-openai.api_key = ''
+setup_logging()
 
 
-def send_openai_request():
+def send_openai_request(api_key, client):
     try:
         response = client.chat.completions.create(model="gpt-3.5-turbo-1106",
                                                   messages=[{
@@ -27,32 +24,55 @@ def send_openai_request():
                                                   presence_penalty=0)
         return response.model_dump_json()
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
+        return None
 
 
-# 每分钟发送四次请求
+def read_api_keys(file_path):
+    with open(file_path, 'r') as file:
+        return file.read().splitlines()
 
-with open('api keys.txt', 'r') as file:
-    api_keys = file.read().splitlines()
 
-new_keys = []
-for i, key in enumerate(api_keys):
-    openai.api_key = key
-    print(f'第{i+1}次尝试，key是: {key}')
-    response = send_openai_request()
-    if response is None or "error" in response:
-        print(f'第{i+1}次尝试失败')
-        time.sleep(5)
-        continue
-    # response2 = send_openai_request()
-    # if response2 is None or "error" in response2:
-    #     print(f'第{i+1}次尝试失败')
-    #     time.sleep(5)
-    #     continue
-    new_keys.append(key)
-    time.sleep(5)
+def main():
+    api_keys = read_api_keys('api keys.txt')
+    new_keys = []
 
-# 打开文件并写入
-with open('new api keys.txt', 'w') as file:
-    for key in new_keys:
-        file.write(key + '\n')
+    for i, key in enumerate(api_keys):
+        openai.api_key = key
+        logger.info(f'第{i+1}次尝试，key是: {key}')
+
+        is_get_limited = False
+        client = openai.OpenAI()
+
+        for _ in range(3):
+            response = send_openai_request(key, client)
+            if response is None or "error" in response:
+                logger.info(f'第{i+1}次尝试失败')
+                org_id = parse_org_id_from_error(response)
+                new_key = f'{key}---{org_id}'
+                new_keys.append(new_key)
+                is_get_limited = True
+                time.sleep(5)
+                break
+            time.sleep(5)
+
+        if not is_get_limited:
+            logger.info(f'第{i+1}次尝试全部通过，key：{key}')
+            new_keys.append(f'{key}---succeed')
+            time.sleep(5)
+
+    with open('new api keys.txt', 'w') as file:
+        for key in new_keys:
+            file.write(f'{key}\n')
+
+
+def parse_org_id_from_error(response):
+    if response and 'Rate limit' in response:
+        pattern = r"org-([A-Za-z0-9]+)"
+        match = re.search(pattern, response)
+        return match.group(1) if match else "No match found"
+    return 'other'
+
+
+if __name__ == "__main__":
+    main()

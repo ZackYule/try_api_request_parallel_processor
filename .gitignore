@@ -1,3 +1,6 @@
 .DS_Store
 api keys.txt
 new api keys.txt
+env
+__pycache__
+pg.py
